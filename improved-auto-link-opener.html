@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Continuous Auto Link Opener/Closer</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      padding: 15px;
+      background-color: #f2f2f2;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    #startBtn, #stopBtn, #allowPopupsBtn {
+      padding: 10px 20px;
+      font-size: 16px;
+      margin-right: 10px;
+      margin-bottom: 10px;
+      cursor: pointer;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      width: 100%;
+      max-width: 200px;
+    }
+    #startBtn {
+      background-color: #4CAF50;
+    }
+    #stopBtn {
+      background-color: #f44336;
+    }
+    #allowPopupsBtn {
+      background-color: #2196F3;
+    }
+    button:disabled {
+      background-color: #cccccc;
+      cursor: not-allowed;
+    }
+    .status {
+      margin-top: 20px;
+      padding: 10px;
+      background-color: #e9e9e9;
+      border-radius: 4px;
+    }
+    .metrics {
+      margin-top: 10px;
+      padding: 10px;
+      background-color: #e0f7fa;
+      border-radius: 4px;
+    }
+    .warning {
+      color: #f44336;
+      font-weight: bold;
+      margin-top: 20px;
+    }
+    .instructions {
+      margin-top: 20px;
+      padding: 15px;
+      background-color: #fff3cd;
+      border-left: 4px solid #ffc107;
+      margin-bottom: 20px;
+    }
+    .hidden {
+      display: none;
+    }
+    #frame {
+      width: 100%;
+      height: 300px;
+      border: 1px solid #ddd;
+      display: none;
+    }
+    @media (max-width: 600px) {
+      button {
+        display: block;
+        margin-bottom: 10px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <h2>Continuous Auto Link Opener and Closer</h2>
+  
+  <div class="instructions" id="popupInstructions">
+    <h3>How to Allow Popups:</h3>
+    <ol>
+      <li>Look for the popup blocked notification at the top of your browser</li>
+      <li>Click on it and select "Always allow popups from this site"</li>
+      <li>Or click the "Test Popup" button below to trigger the permission dialog</li>
+    </ol>
+    <button id="allowPopupsBtn">Test Popup</button>
+  </div>
+  
+  <p>This tool will continuously open and cycle through links until stopped.</p>
+  
+  <button id="startBtn">Start</button>
+  <button id="stopBtn" disabled>Stop</button>
+  
+  <div class="status" id="status">Status: Idle</div>
+  <div class="metrics" id="metrics">
+    Total opened: 0<br>
+    Currently open: 0
+  </div>
+  
+  <div id="frameContainer">
+    <iframe id="frame" sandbox="allow-same-origin allow-scripts allow-popups allow-forms"></iframe>
+  </div>
+  
+  <script>
+    const links = [
+      "https://www.profitableratecpm.com/rnct0itjk?key=0550c92ea01e4f4b64374d7f20243dce",
+      "https://www.profitableratecpm.com/tu63y9be?key=b407df2867a0350426e45133bf17cc1a",
+      "https://www.profitableratecpm.com/hjxp2nv46?key=e8148b85096b5d5267f09b2637898d17",
+      "https://www.profitableratecpm.com/a4wcmma9?key=1ce4bc5e1e7a5e57dc11f406ed201630",
+      "https://borrowbrutewarfare.com/wndpuvh4?key=8ca8d3ffc0aaacc9684a6d30a8d0d011",
+      "https://borrowbrutewarfare.com/s2h34hhtg?key=2f0f4f1c5793421c6d17ebff3d63c1a2",
+      "https://borrowbrutewarfare.com/tpd575bs?key=500e8b955cbb22062e64ee999150e719",
+      "https://borrowbrutewarfare.com/ms3cxqdt?key=4b05721496d18bf8b0d2bafb1c9280c3"
+    ];
+    
+    let isRunning = false;
+    let openWindows = [];
+    let totalOpened = 0;
+    let currentlyOpen = 0;
+    let usingIframe = false;
+    let currentIndex = 0;
+    let popupsBlocked = false;
+    let consecutiveFailures = 0;
+    
+    const statusElement = document.getElementById("status");
+    const metricsElement = document.getElementById("metrics");
+    const frameElement = document.getElementById("frame");
+    const startBtn = document.getElementById("startBtn");
+    const stopBtn = document.getElementById("stopBtn");
+    const allowPopupsBtn = document.getElementById("allowPopupsBtn");
+    const popupInstructions = document.getElementById("popupInstructions");
+    
+    // Update the metrics display
+    function updateMetrics() {
+      // Filter out closed windows
+      openWindows = openWindows.filter(w => !w.closed);
+      currentlyOpen = openWindows.length;
+      if (usingIframe && isRunning) currentlyOpen++; // Count iframe as open if we're using it
+      
+      metricsElement.innerHTML = `Total opened: ${totalOpened}<br>Currently open: ${currentlyOpen}`;
+    }
+    
+    function updateStatus(message) {
+      statusElement.textContent = `Status: ${message}`;
+    }
+    
+    // Test popup to help user allow popups
+    allowPopupsBtn.addEventListener("click", function() {
+      const testWin = window.open("about:blank", "_blank", "width=300,height=200");
+      if (testWin) {
+        testWin.document.write("<h3>Popup Test Successful!</h3><p>You can close this window.</p>");
+        testWin.document.close();
+        updateStatus("Popup test successful. You can now start the process.");
+        popupInstructions.style.display = "none";
+      } else {
+        updateStatus("Popup blocked. Please allow popups for this site.");
+      }
+    });
+    
+    // Function to detect if we're on mobile
+    function isMobileDevice() {
+      return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+    }
+    
+    // Function to open a link in the iframe (alternative method)
+    function openInIframe(link) {
+      frameElement.style.display = "block";
+      frameElement.src = link;
+      usingIframe = true;
+      totalOpened++;
+      updateMetrics();
+      updateStatus(`Opened in iframe: ${link.substring(0, 25)}...`);
+      
+      // Switch to next link after timeout
+      setTimeout(() => {
+        if (isRunning) {
+          cycleToNextLink();
+        }
+      }, 8000 + Math.random() * 4000); // 8-12 seconds
+    }
+    
+    // Function to open a link in a new window
+    function openInNewWindow(link) {
+      try {
+        const win = window.open(link, `_blank_${Date.now()}`, "width=800,height=600");
+        
+        if (win) {
+          popupsBlocked = false;
+          consecutiveFailures = 0;
+          openWindows.push(win);
+          totalOpened++;
+          updateMetrics();
+          updateStatus(`Opened: ${link.substring(0, 25)}...`);
+          
+          // Close after timeout
+          const closeTime = 8000 + Math.random() * 4000; // 8-12 seconds
+          setTimeout(() => {
+            try {
+              if (!win.closed) {
+                win.close();
+                updateMetrics();
+                updateStatus("Closed a window. Continuing cycle...");
+              }
+              
+              // Open next link after a brief delay
+              if (isRunning) {
+                setTimeout(cycleToNextLink, 500 + Math.random() * 1000);
+              }
+            } catch (e) {
+              console.log("Error closing window: ", e);
+              if (isRunning) cycleToNextLink();
+            }
+          }, closeTime);
+          
+          return true;
+        } else {
+          // Popup was blocked
+          popupsBlocked = true;
+          consecutiveFailures++;
+          updateStatus("Popup blocked. Please allow popups for this site.");
+          popupInstructions.style.display = "block";
+          
+          // If multiple failures, switch to iframe mode
+          if (consecutiveFailures >= 2) {
+            switchToIframeMode(link);
+          } else {
+            // Try again after a delay
+            if (isRunning) {
+              setTimeout(cycleToNextLink, 2000);
+            }
+          }
+          return false;
+        }
+      } catch (e) {
+        console.log("Error opening window: ", e);
+        updateStatus("Error opening window: " + e.message);
+        popupsBlocked = true;
+        consecutiveFailures++;
+        
+        // If multiple failures, switch to iframe mode
+        if (consecutiveFailures >= 2) {
+          switchToIframeMode(link);
+        } else {
+          // Try again after a delay
+          if (isRunning) {
+            setTimeout(cycleToNextLink, 2000);
+          }
+        }
+        return false;
+      }
+    }
+    
+    // Switch to iframe mode if popups are being blocked
+    function switchToIframeMode(currentLink) {
+      updateStatus("Switching to iframe mode due to popup blocking");
+      usingIframe = true;
+      openInIframe(currentLink || getNextLink());
+    }
+    
+    // Get the next link in sequence
+    function getNextLink() {
+      const link = links[currentIndex];
+      currentIndex = (currentIndex + 1) % links.length;
+      return link;
+    }
+    
+    // Cycle to the next link
+    function cycleToNextLink() {
+      if (!isRunning) return;
+      
+      const nextLink = getNextLink();
+      
+      // If we've had popup issues, use iframe method
+      if (popupsBlocked || usingIframe || isMobileDevice()) {
+        openInIframe(nextLink);
+      } else {
+        // Try window method first
+        const success = openInNewWindow(nextLink);
+        if (!success && isRunning) {
+          // If window method fails, will automatically retry or switch to iframe
+        }
+      }
+    }
+    
+    // Start button functionality
+    startBtn.addEventListener("click", function() {
+      if (!isRunning) {
+        isRunning = true;
+        updateStatus("Starting process...");
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+        
+        // Start the cycling process
+        cycleToNextLink();
+      }
+    });
+    
+    // Stop button functionality
+    stopBtn.addEventListener("click", function() {
+      isRunning = false;
+      updateStatus("Stopping - closing all windows");
+      
+      // Close all open windows
+      openWindows.forEach((win) => {
+        try {
+          if (!win.closed) {
+            win.close();
+          }
+        } catch (e) {
+          console.log("Error closing window during stop: ", e);
+        }
+      });
+      
+      // Clear iframe
+      frameElement.src = "about:blank";
+      frameElement.style.display = "none";
+      
+      openWindows = [];
+      usingIframe = false;
+      updateMetrics();
+      updateStatus("Stopped - all windows closed");
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+    });
+    
+    // Check for mobile and adjust UI accordingly
+    if (isMobileDevice()) {
+      document.getElementById("popupInstructions").innerHTML += `
+        <div class="warning">
+          <p>Mobile detected: Due to strict popup restrictions on mobile browsers, 
+          this tool will primarily use the iframe method on your device.</p>
+        </div>`;
+    }
+    
+    // Periodically update metrics
+    setInterval(() => {
+      if (isRunning) {
+        updateMetrics();
+      }
+    }, 3000);
+  </script>
+</body>
+</html>
